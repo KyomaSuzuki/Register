@@ -65,12 +65,14 @@
 const LOCAL_KEY = 'pos_sales_v1';
 const FIXED_COST_PER_DAY = 500;
 
-/* ====== 商品定義（4種類） ====== */
+/* ====== 商品定義 ====== */
 const PRODUCTS = [
-  { id:'p1', name:'ベースA + トッピング1', price:400, cost:200 },
-  { id:'p2', name:'ベースA + トッピング2', price:450, cost:220 },
-  { id:'p3', name:'ベースB + トッピング1', price:420, cost:210 },
-  { id:'p4', name:'ベースB + トッピング2', price:480, cost:230 },
+    { id: "p1", name: "プレーン", price: 300, cost: 200 },
+    { id: "p2", name: "にんにくみそ", price: 400, cost: 220 },
+    { id: "p3", name: "とうばんじゃん", price: 400, cost: 210 },
+    { id: "p4", name: "バジル", price: 400, cost: 230 },
+    { id: "p5", name: "大盛り", price:100, cost: 100},
+    { id: "p6", name: "大盛り無料", price:0, cost: 0}
 ];
 
 /* ====== アプリ状態 ====== */
