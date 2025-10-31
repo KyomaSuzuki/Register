@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>iPad POS - ログ</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<header class="topbar">
+  <h1>会計ログ</h1>
+  <nav>
+    <a href="index.html">レジに戻る</a>
+    <a href="summary.html">日別集計</a>
+  </nav>
+</header>
+
+<main class="container">
+  <section class="full">
+    <div class="summary-card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h2>すべての会計</h2>
+        <button id="clearAll" class="small danger">全削除</button>
+      </div>
+      <div id="logList" class="log"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const LOCAL_KEY = 'pos_sales_v1';
+let sales = JSON.parse(localStorage.getItem(LOCAL_KEY) || '[]');
+const logList = document.getElementById('logList');
+
+function renderLogs(){
+  if(sales.length===0){ logList.innerHTML = '<p class="muted">記録がありません。</p>'; return; }
+  logList.innerHTML = sales.slice().reverse().map(s=>{
+    const itemsHtml = s.items.map(it=> `<div class="detail-item">${it.name} <span>¥${it.price}×${it.quantity}</span></div>`).join('');
+    return `
+      <div class="history-row" data-id="${s.id}">
+        <div style="display:flex;gap:10px;align-items:center">
+          <div class="id">#${s.id}</div>
+          <div class="time">${new Date(s.date).toLocaleString()}</div>
+        </div>
+        <div style="margin-left:auto;text-align:right">
+          <div>合計 ¥${s.total}</div>
+          <div>受取 ¥${s.payment} / 釣銭 ¥${s.change}</div>
+          <div class="history-details">${itemsHtml}</div>
+          <div style="margin-top:6px">
+            <button class="small" data-action="delete" data-id="${s.id}">取り消す</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  // hook delete buttons
+  document.querySelectorAll('button[data-action="delete"]').forEach(b=>{
+    b.onclick = ()=>{
+      const id = Number(b.dataset.id);
+      if(!confirm('会計 #' + id + ' を取り消しますか？')) return;
+      sales = sales.filter(x=>x.id!==id);
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(sales));
+      renderLogs();
+      alert('取り消しました');
+    };
+  });
+}
+
+document.getElementById('clearAll').onclick = ()=>{
+  if(!confirm('全てのログを削除しますか？')) return;
+  sales = [];
+  localStorage.removeItem(LOCAL_KEY);
+  renderLogs();
+};
+
+renderLogs();
+</script>
+</body>
+</html>

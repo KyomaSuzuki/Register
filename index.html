@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>iPad POS - メイン</title>
+<link rel="stylesheet" href="style.css" />
+<link rel="manifest" href="manifest.json" />
+</head>
+<body>
+<header class="topbar">
+  <h1>iPad POS</h1>
+  <nav>
+    <a href="summary.html">日別集計</a>
+    <a href="logs.html">会計ログ</a>
+  </nav>
+</header>
+
+<main class="container">
+  <section class="left-panel">
+    <h2>商品</h2>
+    <div class="product-grid" id="productGrid"></div>
+  </section>
+
+  <section class="right-panel">
+    <div class="cart-card">
+      <h2>カート</h2>
+      <ul id="cartList" class="cart-list"></ul>
+
+      <div class="summary-row">
+        <div>合計</div>
+        <div class="big" id="totalDisplay">¥0</div>
+      </div>
+      <div class="summary-row">
+        <div>原価合計</div>
+        <div id="costDisplay">¥0</div>
+      </div>
+
+      <div class="deposit-area">
+        <div class="label">預かり金</div>
+        <div class="deposit-display" id="depositDisplay">¥0</div>
+      </div>
+
+      <div class="keypad-wrap">
+        <div id="keypad" class="keypad"></div>
+      </div>
+
+      <div class="actions">
+        <button id="confirmBtn" class="primary">会計確定</button>
+        <button id="resetCartBtn" class="secondary">カートクリア</button>
+      </div>
+
+      <div id="changeBox" class="change-box" style="display:none;">お釣り：<span id="changeAmount">¥0</span></div>
+
+      <div class="utility">
+        <button id="exportCsv" class="small">CSV出力</button>
+        <button id="unregisterSW" class="small">SW解除（デバッグ）</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+/* ====== 設定 ====== */
+const LOCAL_KEY = 'pos_sales_v1';
+const FIXED_COST_PER_DAY = 500;
+
+/* ====== 商品定義（4種類） ====== */
+const PRODUCTS = [
+  { id:'p1', name:'ベースA + トッピング1', price:400, cost:200 },
+  { id:'p2', name:'ベースA + トッピング2', price:450, cost:220 },
+  { id:'p3', name:'ベースB + トッピング1', price:420, cost:210 },
+  { id:'p4', name:'ベースB + トッピング2', price:480, cost:230 },
+];
+
+/* ====== アプリ状態 ====== */
+let cart = []; // {id,name,price,cost,quantity}
+let depositInput = '';
+let sales = JSON.parse(localStorage.getItem(LOCAL_KEY) || '[]');
+
+/* ====== DOM参照 ====== */
+const productGrid = document.getElementById('productGrid');
+const cartList = document.getElementById('cartList');
+const totalDisplay = document.getElementById('totalDisplay');
+const costDisplay = document.getElementById('costDisplay');
+const depositDisplay = document.getElementById('depositDisplay');
+const keypadDiv = document.getElementById('keypad');
+const changeBox = document.getElementById('changeBox');
+const changeAmount = document.getElementById('changeAmount');
+
+/* ====== 初期表示 ====== */
+function renderProducts(){
+  productGrid.innerHTML = '';
+  PRODUCTS.forEach(p=>{
+    const btn = document.createElement('button');
+    btn.className = 'product-card';
+    btn.innerHTML = `<div class="product-name">${p.name}</div><div class="product-price">¥${p.price}</div>`;
+    btn.onclick = ()=> addToCart(p);
+    productGrid.appendChild(btn);
+  });
+}
+
+function addToCart(prod){
+  const idx = cart.findIndex(x=>x.id===prod.id);
+  if(idx>=0){ cart[idx].quantity++; }
+  else cart.push({...prod, quantity:1});
+  renderCart();
+}
+
+function changeQty(id, delta){
+  cart = cart.map(i => i.id===id ? {...i, quantity: Math.max(1, i.quantity+delta)} : i);
+  renderCart();
+}
+function removeFromCart(id){
+  cart = cart.filter(i=>i.id!==id);
+  renderCart();
+}
+
+function renderCart(){
+  cartList.innerHTML = '';
+  if(cart.length===0){
+    cartList.innerHTML = '<li class="muted">商品を追加してください</li>';
+  } else {
+    cart.forEach(item=>{
+      const li = document.createElement('li');
+      li.className = 'cart-item';
+      li.innerHTML = `
+        <div class="cart-item-left">
+          <div class="cart-name">${item.name}</div>
+          <div class="cart-sub">¥${item.price} × ${item.quantity}</div>
+        </div>
+        <div class="cart-item-right">
+          <div class="cart-price">¥${item.price * item.quantity}</div>
+          <div class="qty-controls">
+            <button class="small-btn" data-action="dec" data-id="${item.id}">−</button>
+            <button class="small-btn" data-action="inc" data-id="${item.id}">＋</button>
+            <button class="small-btn danger" data-action="del" data-id="${item.id}">削除</button>
+          </div>
+        </div>
+      `;
+      cartList.appendChild(li);
+    });
+  }
+  // attach handlers
+  cartList.querySelectorAll('button[data-action]').forEach(b=>{
+    const id=b.dataset.id, action=b.dataset.action;
+    b.onclick = ()=> {
+      if(action==='dec') changeQty(id, -1);
+      if(action==='inc') changeQty(id, +1);
+      if(action==='del') removeFromCart(id);
+    };
+  });
+  updateSummary();
+}
+
+function updateSummary(){
+  const total = cart.reduce((s,i)=>s + i.price * i.quantity,0);
+  const cost = cart.reduce((s,i)=>s + i.cost * i.quantity,0);
+  totalDisplay.textContent = '¥' + total;
+  costDisplay.textContent = '¥' + cost;
+}
+
+/* ====== テンキー（3x4） ====== */
+const KEYS = [['1','2','3'],['4','5','6'],['7','8','9'],['C','0','OK']];
+
+function renderKeypad(){
+  keypadDiv.innerHTML = '';
+  KEYS.forEach(row=>{
+    const rowDiv = document.createElement('div'); rowDiv.className='key-row';
+    row.forEach(k=>{
+      const btn=document.createElement('button');
+      btn.className = 'key ' + (k==='C' ? 'key-clear' : k==='OK' ? 'key-ok' : '');
+      btn.textContent = k;
+      btn.onclick = ()=> handleKey(k);
+      rowDiv.appendChild(btn);
+    });
+    keypadDiv.appendChild(rowDiv);
+  });
+}
+
+function handleKey(k){
+  if(k==='C'){ depositInput=''; depositDisplay.textContent='¥0'; changeBox.style.display='none'; return; }
+  if(k==='OK'){ confirmSale(); return; }
+  depositInput += k;
+  depositDisplay.textContent = '¥' + depositInput;
+}
+
+/* ====== 会計確定 ====== */
+function confirmSale(){
+  const total = cart.reduce((s,i)=>s + i.price * i.quantity,0);
+  const payment = parseInt(depositInput || '0',10);
+  if(cart.length===0){ alert('カートが空です'); return; }
+  if(isNaN(payment) || payment < total){ alert('支払いが不足しています'); return; }
+  const ch = payment - total;
+  // id: 通し番号（最大+1）
+  const nextId = (sales.length>0) ? Math.max(...sales.map(s=>s.id)) + 1 : 1;
+  const sale = {
+    id: nextId,
+    date: new Date().toISOString(),
+    items: cart.map(i=>({ id:i.id, name:i.name, price:i.price, cost:i.cost, quantity:i.quantity })),
+    total,
+    payment,
+    change: ch
+  };
+  sales.push(sale);
+  localStorage.setItem(LOCAL_KEY, JSON.stringify(sales));
+  // reset
+  cart = [];
+  depositInput = '';
+  depositDisplay.textContent='¥0';
+  changeBox.style.display='block';
+  changeAmount.textContent = '¥' + ch;
+  renderCart();
+  alert('会計を保存しました（#' + sale.id + '）');
+}
+
+/* ====== CSV出力 ====== */
+function exportCSV(){
+  if(sales.length===0){ alert('ログがありません'); return; }
+  const rows = [];
+  // header
+  rows.push(['id','date','total','payment','change','items_json']);
+  sales.forEach(s=>{
+    rows.push([s.id, s.date, s.total, s.payment, s.change, JSON.stringify(s.items)]);
+  });
+  const csv = rows.map(r=> r.map(c=> `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'pos_sales.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ====== SW解除（デバッグ用） ====== */
+async function unregisterSW(){
+  if('serviceWorker' in navigator){
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for(const r of regs) await r.unregister();
+    alert('ServiceWorkerを解除しました。再読み込みしてください。');
+  } else alert('ServiceWorker非対応ブラウザです');
+}
+
+/* ====== 初期化 ====== */
+document.getElementById('confirmBtn').onclick = confirmSale;
+document.getElementById('resetCartBtn').onclick = ()=>{ cart=[]; renderCart(); depositInput=''; depositDisplay.textContent='¥0'; changeBox.style.display='none'; };
+document.getElementById('exportCsv').onclick = exportCSV;
+document.getElementById('unregisterSW').onclick = unregisterSW;
+
+renderProducts();
+renderCart();
+renderKeypad();
+
+/* ====== Service Worker登録（PWA: iPadでホーム画面追加すればオフラインで動く） ====== */
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').then(()=> console.log('SW registered')).catch(()=> console.log('SW reg fail'));
+}
+</script>
+</body>
+</html>
